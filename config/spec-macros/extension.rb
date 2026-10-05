@@ -20,6 +20,25 @@ class SpecInlineMacroBase < Extensions::InlineMacroProcessor
     Asciidoctor::Compliance.underline_style_section_titles = false
 
     include Asciidoctor::Logging
+
+    # Check if building roff man pages, which cannot use raw HTML markup
+    def manpage? parent
+        parent.document.backend == 'manpage'
+    end
+
+    # Prevent troff from hyphenating an API name
+    def nohyphen text
+        Asciidoctor::Converter::ManPageConverter::ESC_BS + '%' + text
+    end
+
+    # Monospaced API name - HTML, or roff for man pages
+    def create_code parent, target
+        if manpage? parent
+            create_inline parent, :quoted, nohyphen(target.gsub('&#8594;', '->')), :type => :monospaced
+        else
+            create_inline parent, :quoted, '<code>' + target.gsub('&#8594;', '-&gt;') + '</code>'
+        end
+    end
 end
 
 class NormativeInlineMacroBase < SpecInlineMacroBase
@@ -28,7 +47,11 @@ class NormativeInlineMacroBase < SpecInlineMacroBase
     end
 
     def process parent, target, attributes
-        create_inline parent, :quoted, '<strong class="purple">' + text + '</strong>'
+        if manpage? parent
+            create_inline parent, :quoted, text, :type => :strong
+        else
+            create_inline parent, :quoted, '<strong class="purple">' + text + '</strong>'
+        end
     end
 end
 
@@ -80,11 +103,19 @@ class LinkInlineMacroBase < SpecInlineMacroBase
                 mark = true
             end
           end
+          if manpage? parent
+            return create_inline parent, :quoted, nohyphen(linkxref), :type => :monospaced
+          end
           return create_inline parent, :quoted, (mark ? '?? ' : '') + '<code>' + linkxref + '</code>'
         end
       end
 
-      if parent.document.attributes['cross-file-links']
+      if manpage? parent
+        # Man page cross-reference - only add a section number if the
+        # target is itself a refpage, not e.g. an enumerant
+        text = nohyphen(linkname) + ((linkname == linkxref) ? '(3)' : '')
+        return create_inline parent, :quoted, text, :type => :strong
+      elsif parent.document.attributes['cross-file-links']
         return Inline.new(parent, :anchor, linkname, :type => :link, :target => (linkxref + '.html'))
       else
         return Inline.new(parent, :anchor, linkname, :type => :xref, :target => ('#' + linkxref), :attributes => {'fragment' => linkxref, 'refid' => linkxref})
@@ -100,19 +131,19 @@ class CodeInlineMacroBase < SpecInlineMacroBase
         msg = 'Rewriting nonexistent name macro target: ' + @name.to_s + ':' + oldtarget + ' to ' + target
         logger.info msg
       end
-      create_inline parent, :quoted, '<code>' + target.gsub('&#8594;', '-&gt;') + '</code>'
+      create_code parent, target
     end
 end
 
 class StrongInlineMacroBase < SpecInlineMacroBase
     def process parent, target, attributes
-        create_inline parent, :quoted, '<code>' + target.gsub('&#8594;', '-&gt;') + '</code>'
+        create_code parent, target
     end
 end
 
 class ParamInlineMacroBase < SpecInlineMacroBase
     def process parent, target, attributes
-         create_inline parent, :quoted, '<code>' + target.gsub('&#8594;', '-&gt;') + '</code>'
+         create_code parent, target
     end
 end
 

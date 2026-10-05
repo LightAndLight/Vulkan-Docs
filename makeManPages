@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+#
+# Copyright 2026 The Khronos Group Inc.
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# makeManPages - invoke Makefile with the right options to build the
+# refpages as man pages in GENPATH/out/man/man3, and optionally install
+# them. Uses a separate GENPATH so the default 'gen' tree is not disturbed.
+#
+# Usage: makeManPages [options] [-- extra makeSpec arguments]
+
+set -euo pipefail
+
+usage() {
+    cat <<EOF
+Usage: $0 [options] [-- extra makeSpec / make arguments]
+
+Options:
+  -spec SPEC        Extension set: core, khr, ratified or all (default: all)
+  -version VERSION  API version passed to makeSpec (default: 1.4)
+  -genpath DIR      Generated file directory (default: genman in the
+                    repository)
+  -noclean          Do not clean the generated directory before building
+  -j N              Number of parallel make jobs (default: number of CPUs)
+  -gzip             Also write gzip-compressed pages to
+                    GENPATH/out/man/gz/man3, and install those
+  -install PREFIX   Install the pages into PREFIX/share/man/man3
+                    (e.g. /usr/local or \$HOME/.local)
+  -h, -help         Show this help
+
+Once installed, run 'mandb' (or 'makewhatis') to update the man page
+index so that apropos(1) and whatis(1) can find the pages.
+EOF
+}
+
+spec=all
+version=1.4
+genpath=
+clean=1
+jobs=$(nproc 2>/dev/null || echo 1)
+compress=
+prefix=
+extra=()
+
+while [ $# -gt 0 ] ; do
+    case "$1" in
+        -spec)     spec="$2" ; shift 2 ;;
+        -version)  version="$2" ; shift 2 ;;
+        -genpath)  genpath="$2" ; shift 2 ;;
+        -noclean)  clean= ; shift ;;
+        -j)        jobs="$2" ; shift 2 ;;
+        -j*)       jobs="${1#-j}" ; shift ;;
+        -gzip)     compress=1 ; shift ;;
+        -install)  prefix="$2" ; shift 2 ;;
+        -h|-help|--help) usage ; exit 0 ;;
+        --)        shift ; extra=("$@") ; break ;;
+        *)         echo "$0: unknown option $1" >&2 ; usage >&2 ; exit 1 ;;
+    esac
+done
+
+# Paths given are relative to the current directory, not the repository
+[ -n "$genpath" ] && genpath=$(realpath -m "$genpath")
+[ -n "$prefix" ] && prefix=$(realpath -m "$prefix")
+
+cd "$(dirname "$0")"
+genpath=${genpath:-$PWD/genman}
+mandir="$genpath/out/man/man3"
+
+# 'makeSpec -clean' would also clean the HTML spec and Antora trees
+if [ -n "$clean" ] ; then
+    make GENERATED="$genpath" clean_generated clean_man
+fi
+
+./makeSpec -spec "$spec" -version "$version" -genpath "$genpath" \
+    -j "$jobs" -Otarget "${extra[@]}" manpages
+
+# Compress a copy, so the build directory stays usable for -noclean
+if [ -n "$compress" ] ; then
+    gzdir="$genpath/out/man/gz/man3"
+    echo "Compressing pages into $gzdir"
+    rm -rf "$gzdir"
+    mkdir -p "$gzdir"
+    cp "$mandir"/*.3 "$gzdir"
+    # -n omits the timestamp, for reproducible output
+    find "$gzdir" -name '*.3' -print0 | xargs -0 -r -P "$jobs" -n 200 gzip -9 -n
+    mandir="$gzdir"
+fi
+
+npages=$(find "$mandir" -type f | wc -l)
+echo "Built $npages man pages in $mandir"
+
+if [ -n "$prefix" ] ; then
+    dest="$prefix/share/man/man3"
+    echo "Installing man pages into $dest"
+    mkdir -p "$dest"
+    find "$mandir" -type f -print0 | xargs -0 -r install -m 644 -t "$dest"
+    echo "Run 'mandb' to update the man page index"
+fi

@@ -61,6 +61,7 @@ IMAGEOPTS = inline
 #  manhtml - HTML5 single-page reference guide - NOT SUPPORTED
 #  manpdf - PDF reference guide - NOT SUPPORTED
 #  manhtmlpages - HTML5 separate per-feature refpages
+#  manpages - roff (man page) separate per-feature refpages
 #  allchecks - checks for style guide compliance, XML consistency,
 #   internal link validity, and other easy to catch errors.
 
@@ -686,6 +687,36 @@ MAKEMANALIASES = $(SCRIPTS)/makemanaliases.py
 manaliases: $(PYAPIMAP)
 	$(PYTHON) $(MAKEMANALIASES) -genpath $(GENERATED) -refdir $(MANHTMLDIR)
 
+# These targets are roff (man page) refpages
+manpages: $(REFPAGEPROXY) $(GENDEPENDS)
+	$(QUIET) echo "manpages: building roff refpages with these options:"
+	$(QUIET) echo $(ASCIIDOC) -b manpage $(ADOCOPTS) $(ADOCREFOPTS) \
+	    $(ADOCMANOPTS) -d manpage -o REFPAGE.3 REFPAGE.adoc
+	$(MAKE) $(SUBMAKEOPTIONS) -e buildroffpages
+
+# Build the individual refpages, then the .so stub pages for aliases
+MANROFFDIR  = $(OUTDIR)/man/man3
+MANROFF     = $(MANSOURCES:$(REFPATH)/%.adoc=$(MANROFFDIR)/%.3)
+buildroffpages: $(MANROFF)
+	$(MAKE) $(SUBMAKEOPTIONS) -e manroffaliases
+
+# Asciidoctor options to build roff refpages
+#
+# MANDATE is the page date - the last commit date, or today
+MANDATE    := $(or $(shell git log -1 --format=%cs 2>/dev/null),$(shell date -u +%F))
+ADOCMANOPTS = -a manmanual="Vulkan Manual" -a mansource="Vulkan $(SPECREVISION)" \
+	      -a docdate=$(MANDATE) -r $(CONFIGS)/manpage-converter.rb
+
+$(MANROFFDIR)/%.3: $(REFPATH)/%.adoc $(GENDEPENDS)
+	$(VERYQUIET)echo "Building $@ from $< using default options"
+	$(VERYQUIET)$(MKDIR) $(MANROFFDIR)
+	$(VERYQUIET)$(ASCIIDOC) -b manpage $(ADOCOPTS) $(ADOCREFOPTS) \
+	    $(ADOCMANOPTS) -d manpage -o $@ $<
+
+manroffaliases: $(PYAPIMAP)
+	$(PYTHON) $(MAKEMANALIASES) -genpath $(GENERATED) -refdir $(MANROFFDIR) \
+	    -suffix .3 -so
+
 # Antora-related targets
 
 # Targets generated from the XML and registry processing scripts
@@ -953,7 +984,7 @@ clean_pdf:
 	$(QUIET)$(RMRF) $(PDFDIR)
 
 clean_man:
-	$(QUIET)$(RMRF) $(MANHTMLDIR)
+	$(QUIET)$(RMRF) $(MANHTMLDIR) $(MANROFFDIR)
 
 # Generated directories and files to remove
 CLEAN_GEN_PATHS = \

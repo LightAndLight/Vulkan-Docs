@@ -54,6 +54,7 @@ __pycache__
 /genvkc/
 /genvkg/
 /genvksc/
+/genman/
 
 # Output files and directories
 gen/out/**
